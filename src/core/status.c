@@ -13,6 +13,7 @@ const char* raku_status_to_string(RakuStatus status)
         STATUS_CASE(RAKU_OK, "Operation finished successfully.")
         STATUS_CASE(RAKU_NO_MEMORY, "Not enough memory.")
         STATUS_CASE(RAKU_OUT_OF_RANGE, "Out of range.")
+        STATUS_CASE(RAKU_JSON_NO_KEY, "(JSON) Key does not exist.")
     }
     return NULL;
 

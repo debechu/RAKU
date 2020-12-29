@@ -24,9 +24,7 @@ static const char *log_levels[] = {
 static void get_time(char *buffer, int max_size, const char *format)
 {
     time_t t = time(NULL);
-    struct tm tm;
-    localtime_s(&tm, &t);
-    strftime(buffer, max_size, format, &tm);
+    strftime(buffer, max_size, format, localtime(&t));
 }
 
 RAKU_API
@@ -34,11 +32,11 @@ void raku_log(LogLevel level, const char *format, ...)
 {
     char time[TIME_BUFFER_SIZE];
     get_time(time, TIME_BUFFER_SIZE, TIME_FORMAT);
-    printf_s(LOG_FORMAT, time, log_levels[level]);
+    printf(LOG_FORMAT, time, log_levels[level]);
 
     va_list args;
     va_start(args, format);
-    vprintf_s(format, args);
+    vprintf(format, args);
     va_end(args);
 
     fputc('\n', stdout);

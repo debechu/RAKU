@@ -2,6 +2,7 @@
 #define RAKU_EXPORT_H
 
 #if defined(_WIN32) || defined(__CYGWIN__)
+    #define RAKU_LOCAL
     #if defined(RAKU_STATIC)
         #define RAKU_API
     #else
@@ -24,12 +25,15 @@
 #elif defined(__unix__)
     #if defined(RAKU_STATIC)
         #define RAKU_API
+        #define RAKU_LOCAL
     #else
         #if defined(__GNUC__) || defined(__clang__)
             #if defined(RAKU_BUILD)
-                #define RAKU_API __attribute__((visibility("default")))
+                #define RAKU_API    __attribute__((visibility("default")))
+                #define RAKU_LOCAL  __attribute__((visbility("hidden")))
             #else
                 #define RAKU_API
+                #define RAKU_LOCAL
             #endif
         #else
             #error "Compiler not supported!"

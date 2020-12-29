@@ -11,7 +11,9 @@ typedef enum RakuStatus
 {
     RAKU_OK,
     RAKU_NO_MEMORY,
-    RAKU_OUT_OF_RANGE
+    RAKU_OUT_OF_RANGE,
+    
+    RAKU_JSON_NO_KEY
 } RakuStatus;
 
 RAKU_API

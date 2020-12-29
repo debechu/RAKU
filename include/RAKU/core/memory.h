@@ -2,6 +2,7 @@
 #define RAKU_CORE_MEMORY_H
 
 #include <RAKU/export.h>
+#include <RAKU/core/defs.h>
 #include <RAKU/core/status.h>
 
 #if defined(__cplusplus)

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(RAKU LANGUAGES C VERSION 0.0.0)
+project(RAKU LANGUAGES C VERSION 0.1.0)
 
 option(RAKU_BUILD_TESTS  "Enable unit testing."         ON )
 option(RAKU_BUILD_SHARED "Build RAKU's shared library." ON )
