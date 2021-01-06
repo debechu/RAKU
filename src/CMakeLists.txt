@@ -4,6 +4,7 @@ set(CMAKE_CONFIGURATION_TYPES Debug Release)
 
 set(
     SOURCES
+        string.c
         core/log.c
         core/status.c
         core/memory.c

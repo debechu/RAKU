@@ -6,17 +6,14 @@
 #include <RAKU/core/status.h>
 
 #if defined(__cplusplus)
-#include <cstdint>
 extern "C" {
-#else
-#include <stdint.h>
 #endif
 
 RAKU_API
-RakuStatus raku_alloc(size_t size, void **out);
+enum raku_status raku_alloc(size_t size, void **out);
 
 RAKU_API
-RakuStatus raku_realloc(void *block, size_t new_size, void **out);
+enum raku_status raku_realloc(void *block, size_t new_size, void **out);
 
 RAKU_API
 void raku_free(void *block);

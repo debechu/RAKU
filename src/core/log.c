@@ -28,7 +28,7 @@ static void get_time(char *buffer, int max_size, const char *format)
 }
 
 RAKU_API
-void raku_log(LogLevel level, const char *format, ...)
+void raku_log(enum log_level level, const char *format, ...)
 {
     char time[TIME_BUFFER_SIZE];
     get_time(time, TIME_BUFFER_SIZE, TIME_FORMAT);

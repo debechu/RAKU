@@ -13,17 +13,17 @@
 extern "C" {
 #endif
 
-typedef enum LogLevel
+enum log_level
 {
     RAKU_LOG_LEVEL_INFO,
     RAKU_LOG_LEVEL_TRACE,
     RAKU_LOG_LEVEL_WARN,
     RAKU_LOG_LEVEL_ERROR,
     RAKU_LOG_LEVEL_FATAL
-} LogLevel;
+};
 
 RAKU_API
-void raku_log(LogLevel level, const char *format, ...);
+void raku_log(enum log_level level, const char *format, ...);
 
 #if defined(__cplusplus)
 }

@@ -3,7 +3,7 @@
 #include <stddef.h>
 
 RAKU_API
-const char* raku_status_to_string(RakuStatus status)
+const char* raku_status_to_string(enum raku_status status)
 {
 #define STATUS_CASE(status, message) \
     case status: return message;

@@ -5,8 +5,8 @@
 
 #include <limits.h>
 #include <string.h>
+#include <stdio.h>
 
-#define STRING_BASE_CAPACITY 8
 #define ARRAY_BASE_CAPACITY 8
 #define OBJECT_BASE_CAPACITY 16
 
@@ -15,44 +15,450 @@
 #define FNV_OFFSET_BASIS 2166136261U
 #define FNV_PRIME 16777619U
 
+static enum raku_status raku_json_value_to_string_compact(struct json_value *value, struct raku_string *out)
+{
+    switch (raku_json_value_get_type(value))
+    {
+        case RAKU_JSON_BOOL:
+            if (((struct json_bool*)value)->value)
+                return raku_string_writesc(out, "true");
+            else
+                return raku_string_writesc(out, "false");
+        case RAKU_JSON_NUMBER:
+        {
+            char n[16];
+            snprintf(n, 16, "%.8g", ((struct json_number*)value)->value);
+            return raku_string_writesc(out, n);
+        }
+        default:
+            ASSERT(false, "raku_json_value_to_string_compact: invalid json value.");
+        case RAKU_JSON_NULL:
+            return raku_string_writesc(out, "null");
+        case RAKU_JSON_STRING:
+        {
+            enum raku_status status = raku_string_write(out, '"');
+            if (status != RAKU_OK)
+                goto rjvtsc_rjvgtv_caseRJS_end;
+            
+            const char *c = raku_json_string_get((struct json_string*)value).chars;
+            while (*c)
+            {
+                switch (*c)
+                {
+                case '"':
+                    status = raku_string_writesc(out, "\\\"");
+                    break;
+                case '\\':
+                    status = raku_string_writesc(out, "\\\\");
+                    break;
+                case '/':
+                    status = raku_string_writesc(out, "\\/");
+                    break;
+                case '\b':
+                    status = raku_string_writesc(out, "\\b");
+                    break;
+                case '\f':
+                    status = raku_string_writesc(out, "\\f");
+                    break;
+                case '\n':
+                    status = raku_string_writesc(out, "\\n");
+                    break;
+                case '\r':
+                    status = raku_string_writesc(out, "\\r");
+                    break;
+                case '\t':
+                    status = raku_string_writesc(out, "\\t");
+                    break;
+                default:
+                    status = raku_string_write(out, *c);
+                    break;
+                }
+
+                if (status != RAKU_OK)
+                    goto rjvtsc_rjvgtv_caseRJS_end;
+                
+                ++c;
+            }
+
+            status = raku_string_write(out, '"');
+
+        rjvtsc_rjvgtv_caseRJS_end:
+            return status;
+        }
+        case RAKU_JSON_ARRAY:
+        {
+            enum raku_status status = raku_string_write(out, '[');
+            if (status != RAKU_OK)
+                goto rjvtsc_rjvgtv_caseRJA_end;
+            
+            struct json_array *array = (struct json_array*)value;
+            if (array->count > 0)
+            {
+                status = raku_json_value_to_string_compact(array->values[0], out);
+                if (status != RAKU_OK)
+                    goto rjvtsc_rjvgtv_caseRJA_end;
+
+                for (unsigned int i = 1; i < array->count; ++i)
+                {
+                    status = raku_string_write(out, ',');
+                    if (status != RAKU_OK)
+                        goto rjvtsc_rjvgtv_caseRJA_end;
+                    
+                    status = raku_json_value_to_string_compact(array->values[i], out);
+                    if (status != RAKU_OK)
+                        goto rjvtsc_rjvgtv_caseRJA_end;
+                }
+            }
+
+            status = raku_string_write(out, ']');
+
+        rjvtsc_rjvgtv_caseRJA_end:
+            return status;
+        }
+        case RAKU_JSON_OBJECT:
+        {
+            enum raku_status status = raku_string_write(out, '{');
+            if (status != RAKU_OK)
+                goto rjvtsc_rjvgtv_caseRJO_end;
+            
+            struct json_object *object = (struct json_object*)value;
+            if (object->count > 0)
+            {
+                unsigned int i = 0;
+                unsigned int count = 0;
+                for (; i < object->capacity && count != 1; ++i)
+                {
+                    if (object->keys[i].value.chars == NULL)
+                        continue;
+
+                    status = raku_json_value_to_string_compact((struct json_value*)(object->keys+i), out);
+                    if (status != RAKU_OK)
+                        goto rjvtsc_rjvgtv_caseRJO_end;
+                    
+                    status = raku_string_write(out, ':');
+                    if (status != RAKU_OK)
+                        goto rjvtsc_rjvgtv_caseRJO_end;
+                    
+                    status = raku_json_value_to_string_compact(object->values[i], out);
+                    if (status != RAKU_OK)
+                        goto rjvtsc_rjvgtv_caseRJO_end;
+                    
+                    ++count;
+                }
+
+                for (; i < object->capacity && count < object->count; ++i)
+                {
+                    if (object->keys[i].value.chars == NULL)
+                        continue;
+
+                    status = raku_string_write(out, ',');
+                    if (status != RAKU_OK)
+                        goto rjvtsc_rjvgtv_caseRJO_end;
+
+                    status = raku_json_value_to_string_compact((struct json_value*)(object->keys+i), out);
+                    if (status != RAKU_OK)
+                        goto rjvtsc_rjvgtv_caseRJO_end;
+                    
+                    status = raku_string_write(out, ':');
+                    if (status != RAKU_OK)
+                        goto rjvtsc_rjvgtv_caseRJO_end;
+                    
+                    status = raku_json_value_to_string_compact(object->values[i], out);
+                    if (status != RAKU_OK)
+                        goto rjvtsc_rjvgtv_caseRJO_end;
+                    
+                    ++count;
+                }
+            }
+
+            status = raku_string_write(out, '}');
+            
+        rjvtsc_rjvgtv_caseRJO_end:
+            return status;
+        }
+    }
+}
+
+static enum raku_status write_indent(const char *indent, unsigned int level, struct raku_string *out)
+{
+    enum raku_status status = RAKU_OK;
+    for (unsigned int i = 0; i < level; ++i)
+    {
+        status = raku_string_writesc(out, indent);
+        if (status != RAKU_OK)
+            break;
+    }
+    return status;
+}
+
+static enum raku_status raku_json_value_to_string_indent(
+    struct json_value *value,
+    const char *indent,
+    unsigned int level,
+    struct raku_string *out)
+{
+    switch (raku_json_value_get_type(value))
+    {
+        case RAKU_JSON_BOOL:
+            if (((struct json_bool*)value)->value)
+                return raku_string_writesc(out, "true");
+            else
+                return raku_string_writesc(out, "false");
+        case RAKU_JSON_NUMBER:
+        {
+            char n[16];
+            snprintf(n, 16, "%.8g", ((struct json_number*)value)->value);
+            return raku_string_writesc(out, n);
+        }
+        default:
+            ASSERT(false, "raku_json_value_to_string_compact: invalid json value.");
+        case RAKU_JSON_NULL:
+            return raku_string_writesc(out, "null");
+        case RAKU_JSON_STRING:
+        {
+            enum raku_status status = raku_string_write(out, '"');
+            if (status != RAKU_OK)
+                goto rjvtsi_rjvgtv_caseRJS_end;
+            
+            const char *c = raku_json_string_get((struct json_string*)value).chars;
+            while (*c)
+            {
+                switch (*c)
+                {
+                case '"':
+                    status = raku_string_writesc(out, "\\\"");
+                    break;
+                case '\\':
+                    status = raku_string_writesc(out, "\\\\");
+                    break;
+                case '/':
+                    status = raku_string_writesc(out, "\\/");
+                    break;
+                case '\b':
+                    status = raku_string_writesc(out, "\\b");
+                    break;
+                case '\f':
+                    status = raku_string_writesc(out, "\\f");
+                    break;
+                case '\n':
+                    status = raku_string_writesc(out, "\\n");
+                    break;
+                case '\r':
+                    status = raku_string_writesc(out, "\\r");
+                    break;
+                case '\t':
+                    status = raku_string_writesc(out, "\\t");
+                    break;
+                default:
+                    status = raku_string_write(out, *c);
+                    break;
+                }
+
+                if (status != RAKU_OK)
+                    goto rjvtsi_rjvgtv_caseRJS_end;
+                
+                ++c;
+            }
+
+            status = raku_string_write(out, '"');
+
+        rjvtsi_rjvgtv_caseRJS_end:
+            return status;
+        }
+        case RAKU_JSON_ARRAY:
+        {
+            enum raku_status status = raku_string_write(out, '[');
+            if (status != RAKU_OK)
+                goto rjvtsi_rjvgtv_caseRJA_end;
+            
+            struct json_array *array = (struct json_array*)value;
+            if (array->count > 0)
+            {
+                status = raku_string_write(out, '\n');
+                if (status != RAKU_OK)
+                    goto rjvtsi_rjvgtv_caseRJA_end;
+
+                status = write_indent(indent, level+1, out);
+                if (status != RAKU_OK)
+                    goto rjvtsi_rjvgtv_caseRJA_end;
+
+                status = raku_json_value_to_string_indent(array->values[0], indent, level+1, out);
+                if (status != RAKU_OK)
+                    goto rjvtsi_rjvgtv_caseRJA_end;
+
+                for (unsigned int i = 1; i < array->count; ++i)
+                {
+                    status = raku_string_writesc(out, ",\n");
+                    if (status != RAKU_OK)
+                        goto rjvtsi_rjvgtv_caseRJA_end;
+
+                    status = write_indent(indent, level+1, out);
+                    if (status != RAKU_OK)
+                        goto rjvtsi_rjvgtv_caseRJA_end;
+
+                    status = raku_json_value_to_string_indent(array->values[i], indent, level+1, out);
+                    if (status != RAKU_OK)
+                        goto rjvtsi_rjvgtv_caseRJA_end;
+                }
+
+                status = raku_string_write(out, '\n');
+                if (status != RAKU_OK)
+                    goto rjvtsi_rjvgtv_caseRJA_end;
+
+                status = write_indent(indent, level, out);
+                if (status != RAKU_OK)
+                    goto rjvtsi_rjvgtv_caseRJA_end;
+            }
+
+            status = raku_string_write(out, ']');
+
+        rjvtsi_rjvgtv_caseRJA_end:
+            return status;
+        }
+        case RAKU_JSON_OBJECT:
+        {
+            enum raku_status status = raku_string_write(out, '{');
+            if (status != RAKU_OK)
+                goto rjvtsi_rjvgtv_caseRJO_end;
+            
+            struct json_object *object = (struct json_object*)value;
+            if (object->count > 0)
+            {
+                status = raku_string_write(out, '\n');
+                if (status != RAKU_OK)
+                    goto rjvtsi_rjvgtv_caseRJO_end;
+                
+                status = write_indent(indent, level+1, out);
+                if (status != RAKU_OK)
+                    goto rjvtsi_rjvgtv_caseRJO_end;
+
+                unsigned int i = 0;
+                unsigned int count = 0;
+                for (; i < object->capacity && count != 1; ++i)
+                {
+                    if (object->keys[i].value.chars == NULL)
+                        continue;
+
+                    status = raku_json_value_to_string_indent((struct json_value*)(object->keys+i), indent, level+1, out);
+                    if (status != RAKU_OK)
+                        goto rjvtsi_rjvgtv_caseRJO_end;
+                    
+                    status = raku_string_writesc(out, ": ");
+                    if (status != RAKU_OK)
+                        goto rjvtsi_rjvgtv_caseRJO_end;
+                    
+                    status = raku_json_value_to_string_indent(object->values[i], indent, level+1, out);
+                    if (status != RAKU_OK)
+                        goto rjvtsi_rjvgtv_caseRJO_end;
+                    
+                    ++count;
+                }
+
+                for (; i < object->capacity && count < object->count; ++i)
+                {
+                    if (object->keys[i].value.chars == NULL)
+                        continue;
+
+                    status = raku_string_writesc(out, ",\n");
+                    if (status != RAKU_OK)
+                        goto rjvtsi_rjvgtv_caseRJO_end;
+                    
+                    status = write_indent(indent, level+1, out);
+                    if (status != RAKU_OK)
+                        goto rjvtsi_rjvgtv_caseRJO_end;
+
+                    status = raku_json_value_to_string_indent((struct json_value*)(object->keys+i), indent, level, out);
+                    if (status != RAKU_OK)
+                        goto rjvtsi_rjvgtv_caseRJO_end;
+                    
+                    status = raku_string_writesc(out, ": ");
+                    if (status != RAKU_OK)
+                        goto rjvtsi_rjvgtv_caseRJO_end;
+                    
+                    status = raku_json_value_to_string_indent(object->values[i], indent, level+1, out);
+                    if (status != RAKU_OK)
+                        goto rjvtsi_rjvgtv_caseRJO_end;
+                    
+                    ++count;
+                }
+
+                status = raku_string_write(out, '\n');
+                if (status != RAKU_OK)
+                    goto rjvtsi_rjvgtv_caseRJO_end;
+                
+                status = write_indent(indent, level, out);
+                if (status != RAKU_OK)
+                    goto rjvtsi_rjvgtv_caseRJO_end;
+            }
+
+            status = raku_string_write(out, '}');
+            
+        rjvtsi_rjvgtv_caseRJO_end:
+            return status;
+        }
+    }
+}
+
 RAKU_API
-JsonValueType raku_json_value_get_type(JsonValue *value)
+enum raku_status raku_json_value_to_string(struct json_value *value, enum json_format_option options, struct raku_string *out)
+{
+    struct raku_string string;
+    raku_string_init(&string);
+
+    enum raku_status status = RAKU_OK;
+    if ((options & 0x3) == RAKU_JSON_FORMAT_COMPACT)
+        status = raku_json_value_to_string_compact(value, &string);
+    else if ((options & 0x3) == RAKU_JSON_FORMAT_INDENT2)
+        status = raku_json_value_to_string_indent(value, "  ", 0, &string);
+    else if ((options & 0x3) == RAKU_JSON_FORMAT_INDENT4)
+        status = raku_json_value_to_string_indent(value, "    ", 0, &string);
+    else if ((options & 0x3) == RAKU_JSON_FORMAT_TAB)
+        status = raku_json_value_to_string_indent(value, "\t", 0, &string);
+    
+    if (status == RAKU_OK)
+        raku_string_own(out, &string);
+    else
+        raku_string_free(&string);
+    
+    return status;
+}
+
+RAKU_API
+enum json_value_type raku_json_value_get_type(struct json_value *value)
 {
     return value ? value->type : RAKU_JSON_NULL;
 }
 
 RAKU_API
-bool raku_json_value_of_type(JsonValue *value, JsonValueType type)
+bool raku_json_value_of_type(struct json_value *value, enum json_value_type type)
 {
     return value ? value->type == type : type == RAKU_JSON_NULL;
 }
 
 RAKU_LOCAL
-void raku_json_bool_init(JsonBool *boolean)
+void raku_json_bool_init(struct json_bool *boolean)
 {
     boolean->_header.type = RAKU_JSON_BOOL;
     boolean->value = 0;
 }
 
 RAKU_LOCAL
-void raku_json_number_init(JsonNumber *number)
+void raku_json_number_init(struct json_number *number)
 {
     number->_header.type = RAKU_JSON_NUMBER;
     number->value = 0;
 }
 
 RAKU_LOCAL
-void raku_json_string_init(JsonString *string)
+void raku_json_string_init(struct json_string *string)
 {
     string->_header.type = RAKU_JSON_STRING;
-    string->chars = NULL;
     string->hash = FNV_OFFSET_BASIS;
-    string->count = 0;
-    string->capacity = 0;
+    raku_string_init(&string->value);
 }
 
 RAKU_LOCAL
-void raku_json_array_init(JsonArray *array)
+void raku_json_array_init(struct json_array *array)
 {
     array->_header.type = RAKU_JSON_ARRAY;
     array->values = NULL;
@@ -61,7 +467,7 @@ void raku_json_array_init(JsonArray *array)
 }
 
 RAKU_LOCAL
-void raku_json_object_init(JsonObject *object)
+void raku_json_object_init(struct json_object *object)
 {
     object->_header.type = RAKU_JSON_OBJECT;
     object->keys = NULL;
@@ -71,11 +477,11 @@ void raku_json_object_init(JsonObject *object)
 }
 
 RAKU_API
-RakuStatus raku_json_bool_create(JsonBool **out)
+enum raku_status raku_json_bool_create(struct json_bool **out)
 {
-    JsonBool *boolean;
-    RakuStatus status = raku_alloc(
-        sizeof(struct JsonBool),
+    struct json_bool *boolean;
+    enum raku_status status = raku_alloc(
+        sizeof(struct json_bool),
         (void**)&boolean
     );
 
@@ -89,11 +495,11 @@ RakuStatus raku_json_bool_create(JsonBool **out)
 }
 
 RAKU_API
-RakuStatus raku_json_number_create(JsonNumber **out)
+enum raku_status raku_json_number_create(struct json_number **out)
 {
-    JsonNumber *number;
-    RakuStatus status = raku_alloc(
-        sizeof(struct JsonNumber),
+    struct json_number *number;
+    enum raku_status status = raku_alloc(
+        sizeof(struct json_number),
         (void**)&number
     );
 
@@ -107,11 +513,11 @@ RakuStatus raku_json_number_create(JsonNumber **out)
 }
 
 RAKU_API
-RakuStatus raku_json_string_create(JsonString **out)
+enum raku_status raku_json_string_create(struct json_string **out)
 {
-    JsonString *string;
-    RakuStatus status = raku_alloc(
-        sizeof(struct JsonString),
+    struct json_string *string;
+    enum raku_status status = raku_alloc(
+        sizeof(struct json_string),
         (void**)&string
     );
 
@@ -125,11 +531,11 @@ RakuStatus raku_json_string_create(JsonString **out)
 }
 
 RAKU_API
-RakuStatus raku_json_array_create(JsonArray **out)
+enum raku_status raku_json_array_create(struct json_array **out)
 {
-    JsonArray *array;
-    RakuStatus status = raku_alloc(
-        sizeof(struct JsonArray),
+    struct json_array *array;
+    enum raku_status status = raku_alloc(
+        sizeof(struct json_array),
         (void**)&array
     );
 
@@ -143,11 +549,11 @@ RakuStatus raku_json_array_create(JsonArray **out)
 }
 
 RAKU_API
-RakuStatus raku_json_object_create(JsonObject **out)
+enum raku_status raku_json_object_create(struct json_object **out)
 {
-    JsonObject *object;
-    RakuStatus status = raku_alloc(
-        sizeof(struct JsonObject),
+    struct json_object *object;
+    enum raku_status status = raku_alloc(
+        sizeof(struct json_object),
         (void**)&object
     );
 
@@ -161,18 +567,18 @@ RakuStatus raku_json_object_create(JsonObject **out)
 }
 
 RAKU_LOCAL
-void raku_json_string_free(JsonString *string)
+void raku_json_string_free(struct json_string *string)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)string, RAKU_JSON_STRING),
+    ASSERT(raku_json_value_of_type((struct json_value*)string, RAKU_JSON_STRING),
            "raku_json_string_free: invalid string.");
 
-    raku_free(string->chars);
+    raku_string_free(&string->value);
 }
 
 RAKU_LOCAL
-void raku_json_array_free(JsonArray *array)
+void raku_json_array_free(struct json_array *array)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)array, RAKU_JSON_ARRAY),
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
            "raku_json_array_free: invalid array.");
 
     for (unsigned int i = 0; i < array->count; ++i)
@@ -183,16 +589,16 @@ void raku_json_array_free(JsonArray *array)
 }
 
 RAKU_LOCAL
-void raku_json_object_free(JsonObject *object)
+void raku_json_object_free(struct json_object *object)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)object, RAKU_JSON_OBJECT),
+    ASSERT(raku_json_value_of_type((struct json_value*)object, RAKU_JSON_OBJECT),
            "raku_json_object_free: invalid object.");
 
     for (unsigned int i = 0, count = 0;
          i < object->capacity && count != object->count;
          ++i)
     {
-        if (object->keys[i].chars == NULL)
+        if (object->keys[i].value.chars == NULL)
             continue;
         raku_json_string_free(object->keys+i);
         raku_json_value_free(object->values[i]);
@@ -203,18 +609,18 @@ void raku_json_object_free(JsonObject *object)
 }
 
 RAKU_API
-void raku_json_value_free(JsonValue *value)
+void raku_json_value_free(struct json_value *value)
 {
     switch (raku_json_value_get_type(value))
     {
         case RAKU_JSON_STRING:
-            raku_json_string_free((JsonString*)value);
+            raku_json_string_free((struct json_string*)value);
             break;
         case RAKU_JSON_ARRAY:
-            raku_json_array_free((JsonArray*)value);
+            raku_json_array_free((struct json_array*)value);
             break;
         case RAKU_JSON_OBJECT:
-            raku_json_object_free((JsonObject*)value);
+            raku_json_object_free((struct json_object*)value);
             break;
         case RAKU_JSON_NULL:
         case RAKU_JSON_BOOL:
@@ -228,40 +634,40 @@ void raku_json_value_free(JsonValue *value)
 }
 
 RAKU_API
-void raku_json_bool_set(JsonBool *boolean, bool value)
+void raku_json_bool_set(struct json_bool *boolean, bool value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)boolean, RAKU_JSON_BOOL),
+    ASSERT(raku_json_value_of_type((struct json_value*)boolean, RAKU_JSON_BOOL),
            "raku_json_bool_set: invalid boolean.");
     boolean->value = value;
 }
 
 RAKU_API
-bool raku_json_bool_get(JsonBool *boolean)
+bool raku_json_bool_get(struct json_bool *boolean)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)boolean, RAKU_JSON_BOOL),
+    ASSERT(raku_json_value_of_type((struct json_value*)boolean, RAKU_JSON_BOOL),
            "raku_json_bool_get: invalid boolean.");
     return boolean->value;
 }
 
 RAKU_API
-void raku_json_number_set(JsonNumber *number, double value)
+void raku_json_number_set(struct json_number *number, double value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)number, RAKU_JSON_NUMBER),
+    ASSERT(raku_json_value_of_type((struct json_value*)number, RAKU_JSON_NUMBER),
            "raku_json_number_set: invalid number.");
     number->value = value;
 }
 
 RAKU_API
-double raku_json_number_get(JsonNumber *number)
+double raku_json_number_get(struct json_number *number)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)number, RAKU_JSON_NUMBER),
+    ASSERT(raku_json_value_of_type((struct json_value*)number, RAKU_JSON_NUMBER),
            "raku_json_number_get: invalid number.");
     return number->value;
 }
 
-static StringHash hash_string(const char *src)
+static string_hash hash_string(const char *src)
 {
-    StringHash hash = FNV_OFFSET_BASIS;
+    string_hash hash = FNV_OFFSET_BASIS;
     while (*src != '\0')
     {
         hash ^= *(src++);
@@ -270,182 +676,69 @@ static StringHash hash_string(const char *src)
     return hash;
 }
 
-static RakuStatus grow_string(JsonString *string, unsigned int size)
+RAKU_API
+void raku_json_string_set(struct json_string *string, struct raku_string *value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)string, RAKU_JSON_STRING),
-           "grow_string: invalid string.");
-    
-    if (size == 0)
-        return RAKU_OK;
-    else if (size > (UINT_MAX - string->count - 8))
-        return RAKU_NO_MEMORY;
+    ASSERT(raku_json_value_of_type((struct json_value*)string, RAKU_JSON_STRING),
+           "raku_json_string_set: invalid string.");
+    ASSERT(value != NULL,
+           "raku_json_string_set: value must not be NULL!");
 
-    unsigned int new_capacity;
-    unsigned int min_capacity = string->count + size;
-    if (min_capacity > (UINT_MAX / 2))
-        new_capacity = min_capacity+7;
-    else
-    {
-        new_capacity =
-            (string->capacity < STRING_BASE_CAPACITY) ?
-                STRING_BASE_CAPACITY :
-                2 * string->capacity;
-        
-        if (new_capacity < min_capacity)
-            new_capacity = min_capacity;
-    }
-    
-    RakuStatus status = raku_realloc(
-        string->chars,
-        (new_capacity+1) * sizeof(char),
-        (void**)&string->chars
-    );
+    raku_string_own(&string->value, value);
+    string->hash = hash_string(string->value.chars);
+}
 
+RAKU_API
+enum raku_status raku_json_string_setc(struct json_string *string, const char *value)
+{
+    ASSERT(raku_json_value_of_type((struct json_value*)string, RAKU_JSON_STRING),
+           "raku_json_string_setc: invalid string.");
+    ASSERT(value != NULL,
+           "raku_json_string_setc: value must not be NULL!");
+
+    enum raku_status status = raku_string_copyc(&string->value, value);
     if (status == RAKU_OK)
-        string->capacity = new_capacity;
+        string->hash = hash_string(string->value.chars);
     
     return status;
 }
 
 RAKU_API
-RakuStatus raku_json_string_write(JsonString *string, char c)
+const struct raku_string raku_json_string_get(struct json_string *string)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)string, RAKU_JSON_STRING),
-           "raku_json_string_write: invalid string.");
-
-    RakuStatus status = RAKU_OK;
-    if (string->count+1 > string->capacity)
-    {
-        status = grow_string(string, 1U);
-        if (status != RAKU_OK)
-            goto rjsw_error;
-    }
-
-    string->chars[string->count++] = c;
-    string->chars[string->count] = '\0';
-    string->hash ^= c;
-    string->hash *= FNV_PRIME;
-
-rjsw_error:
-    return status;
-}
-
-RAKU_API
-RakuStatus raku_json_string_write_string(JsonString *string, JsonString *other)
-{
-    ASSERT(raku_json_value_of_type((JsonValue*)string, RAKU_JSON_STRING),
-           "raku_json_string_write_string: invalid string.");
-    ASSERT(raku_json_value_of_type((JsonValue*)other, RAKU_JSON_STRING),
-           "raku_json_string_write_string: invalid other.");
-    
-    
-    RakuStatus status = RAKU_OK;
-    if (string->count+other->count > string->capacity)
-    {
-        status = grow_string(string, other->count);
-        if (status != RAKU_OK)
-            goto rjsws_error;
-    }
-
-    for (unsigned int i = 0; i < other->count; ++i)
-    {
-        char c = other->chars[i];
-        string->chars[string->count++] = c;
-        string->hash ^= c;
-        string->hash *= FNV_PRIME;
-    }
-    string->chars[string->count] = '\0';
-
-rjsws_error:
-    return status;
-}
-
-RAKU_API
-RakuStatus raku_json_string_write_stringc(JsonString *string, unsigned int size, const char *other)
-{
-    ASSERT(raku_json_value_of_type((JsonValue*)string, RAKU_JSON_STRING),
-           "raku_json_string_write_stringc: invalid string.");
-    ASSERT(other != NULL,
-           "raku_json_string_write_stringc: invalid other.");
-
-    RakuStatus status = RAKU_OK;
-    if (string->count+size > string->capacity)
-    {
-        status = grow_string(string, size);
-        if (status != RAKU_OK)
-            goto rjswsc_error;
-    }
-
-    for (unsigned int i = 0; i < size; ++i)
-    {
-        char c = other[i];
-        string->chars[string->count++] = c;
-        string->hash ^= c;
-        string->hash *= FNV_PRIME;
-    }
-    string->chars[string->count] = '\0';
-
-rjswsc_error:
-    return status;
-}
-
-RAKU_API
-RakuStatus raku_json_string_get(JsonString *string, unsigned int index, char *out)
-{
-    ASSERT(raku_json_value_of_type((JsonValue*)string, RAKU_JSON_STRING),
+    ASSERT(raku_json_value_of_type((struct json_value*)string, RAKU_JSON_STRING),
            "raku_json_string_get: invalid string.");
     
-    if (index >= string->count)
-        return RAKU_OUT_OF_RANGE;
-
-    *out = string->chars[index];
-    return RAKU_OK;
+    return string->value;
 }
 
 RAKU_API
-bool raku_json_string_equal(JsonString *string, JsonString *other)
+bool raku_json_string_equal(const struct json_string *string, const struct json_string *other)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)string, RAKU_JSON_STRING),
+    ASSERT(raku_json_value_of_type((struct json_value*)string, RAKU_JSON_STRING),
            "raku_json_string_equal: invalid string.");
-    ASSERT(raku_json_value_of_type((JsonValue*)other, RAKU_JSON_STRING),
+    ASSERT(raku_json_value_of_type((struct json_value*)other, RAKU_JSON_STRING),
            "raku_json_string_equal: invalid other.");
 
     return
-        (string->count == other->count)
-        && (string->hash == other->hash)
-        && (strncmp(string->chars, other->chars, string->count) == 0);
+        (string->hash == other->hash) &&
+        raku_string_equal(&string->value, &other->value);
 }
 
 RAKU_API
-bool raku_json_string_equalc(JsonString *string, unsigned int size, const char *other)
+bool raku_json_string_equalc(const struct json_string *string, const char *other)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)string, RAKU_JSON_STRING),
-           "raku_json_string_equal: invalid string.");
+    ASSERT(raku_json_value_of_type((struct json_value*)string, RAKU_JSON_STRING),
+           "raku_json_string_equalc: invalid string.");
+    ASSERT(other != NULL,
+           "raku_json_string_equalc: invalid other!");
 
-    return
-        (string->count == size)
-        && (strncmp(string->chars, other, size) == 0);
+    return raku_string_equalc(&string->value, other);
 }
 
-RAKU_API
-const char* raku_json_string_chars(JsonString *string)
+static enum raku_status grow_array(struct json_array *array, unsigned int size)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)string, RAKU_JSON_STRING),
-           "raku_json_string_chars: invalid string.");
-    return string->chars;
-}
-
-RAKU_API
-unsigned int raku_json_string_size(JsonString *string)
-{
-    ASSERT(raku_json_value_of_type((JsonValue*)string, RAKU_JSON_STRING),
-           "raku_json_string_size: invalid string.");
-    return string->count;
-}
-
-static RakuStatus grow_array(JsonArray *array, unsigned int size)
-{
-    ASSERT(raku_json_value_of_type((JsonValue*)array, RAKU_JSON_ARRAY),
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
            "grow_array: invalid array.");
 
     if (size == 0)
@@ -467,9 +760,9 @@ static RakuStatus grow_array(JsonArray *array, unsigned int size)
             new_capacity = min_capacity;
     }
 
-    RakuStatus status = raku_realloc(
+    enum raku_status status = raku_realloc(
         array->values,
-        new_capacity * sizeof(JsonValue*),
+        new_capacity * sizeof(struct json_value*),
         (void**)&array->values
     );
 
@@ -480,12 +773,12 @@ static RakuStatus grow_array(JsonArray *array, unsigned int size)
 }
 
 RAKU_API
-RakuStatus raku_json_array_push(JsonArray *array, JsonValue *value)
+enum raku_status raku_json_array_push(struct json_array *array, struct json_value *value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)array, RAKU_JSON_ARRAY),
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
            "raku_json_array_push: invalid array.");
 
-    RakuStatus status = RAKU_OK;
+    enum raku_status status = RAKU_OK;
     if (array->count+1 > array->capacity)
     {
         status = grow_array(array, 1U);
@@ -500,68 +793,94 @@ rjap_error:
 }
 
 RAKU_API
-RakuStatus raku_json_array_push_bool(JsonArray *array, bool value)
+enum raku_status raku_json_array_push_bool(struct json_array *array, bool value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)array, RAKU_JSON_ARRAY),
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
            "raku_json_array_push_bool: invalid array.");
 
-    JsonBool *boolean;
-    RakuStatus status = raku_json_bool_create(&boolean);
+    struct json_bool *boolean;
+    enum raku_status status = raku_json_bool_create(&boolean);
     if (status == RAKU_OK)
     {
         raku_json_bool_set(boolean, value);
-        status = raku_json_array_push(array, (JsonValue*)boolean);
+        status = raku_json_array_push(array, (struct json_value*)boolean);
         if (status != RAKU_OK)
-            raku_json_value_free((JsonValue*)boolean);
+            raku_json_value_free((struct json_value*)boolean);
     }
     return status;
 }
 
 RAKU_API
-RakuStatus raku_json_array_push_number(JsonArray *array, double value)
+enum raku_status raku_json_array_push_number(struct json_array *array, double value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)array, RAKU_JSON_ARRAY),
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
            "raku_json_array_push_number: invalid array.");
 
-    JsonNumber *number;
-    RakuStatus status = raku_json_number_create(&number);
+    struct json_number *number;
+    enum raku_status status = raku_json_number_create(&number);
     if (status == RAKU_OK)
     {
         raku_json_number_set(number, value);
-        status = raku_json_array_push(array, (JsonValue*)number);
+        status = raku_json_array_push(array, (struct json_value*)number);
         if (status != RAKU_OK)
-            raku_json_value_free((JsonValue*)number);
+            raku_json_value_free((struct json_value*)number);
     }
     return status;
 }
 
 RAKU_API
-RakuStatus raku_json_array_push_string(JsonArray *array, unsigned int size, const char *value)
+enum raku_status raku_json_array_push_string(struct json_array *array, struct raku_string *value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)array, RAKU_JSON_ARRAY),
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
            "raku_json_array_push_string: invalid array.");
+    ASSERT(value != NULL,
+           "raku_json_array_push_string: invalid value.");
 
-    JsonString *string;
-    RakuStatus status = raku_json_string_create(&string);
+    struct json_string *string;
+    enum raku_status status = raku_json_string_create(&string);
     if (status == RAKU_OK)
     {
-        status = raku_json_string_write_stringc(string, size, value);
+        raku_json_string_set(string, value);
+        status = raku_json_array_push(array, (struct json_value*)string);
         if (status == RAKU_OK)
-        {
-            status = raku_json_array_push(array, (JsonValue*)string);
-            if (status == RAKU_OK)
-                goto rjaps_end;
-        }
-        raku_json_value_free((JsonValue*)string);
+            goto rjaps_end;
+        raku_json_value_free((struct json_value*)string);
     }
+
 rjaps_end:
     return status;
 }
 
 RAKU_API
-void raku_json_array_remove(JsonArray *array, JsonValue *value)
+enum raku_status raku_json_array_push_stringc(struct json_array *array, const char *value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)array, RAKU_JSON_ARRAY),
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
+           "raku_json_array_push_string: invalid array.");
+    ASSERT(value != NULL,
+           "raku_json_array_push_string: invalid value.");
+
+    struct json_string *string;
+    enum raku_status status = raku_json_string_create(&string);
+    if (status == RAKU_OK)
+    {
+        status = raku_json_string_setc(string, value);
+        if (status == RAKU_OK)
+        {
+            status = raku_json_array_push(array, (struct json_value*)string);
+            if (status == RAKU_OK)
+                goto rjapsc_end;
+        }
+        raku_json_value_free((struct json_value*)string);
+    }
+
+rjapsc_end:
+    return status;
+}
+
+RAKU_API
+void raku_json_array_remove(struct json_array *array, struct json_value *value)
+{
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
            "raku_json_array_remove: invalid array.");
 
     unsigned int index = 0;
@@ -575,17 +894,17 @@ void raku_json_array_remove(JsonArray *array, JsonValue *value)
 }
 
 RAKU_API
-void raku_json_array_remove_bool(JsonArray *array, bool value)
+void raku_json_array_remove_bool(struct json_array *array, bool value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)array, RAKU_JSON_ARRAY),
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
            "raku_json_array_remove_bool: invalid array.");
 
     unsigned int index = 0;
     while (index < array->count)
     {
-        JsonValue *v = array->values[index];
+        struct json_value *v = array->values[index];
         if (raku_json_value_of_type(v, RAKU_JSON_BOOL) &&
-            raku_json_bool_get((JsonBool*)v) == value)
+            raku_json_bool_get((struct json_bool*)v) == value)
         {
             break;
         }
@@ -595,17 +914,17 @@ void raku_json_array_remove_bool(JsonArray *array, bool value)
 }
 
 RAKU_API
-void raku_json_array_remove_number(JsonArray *array, double value)
+void raku_json_array_remove_number(struct json_array *array, double value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)array, RAKU_JSON_ARRAY),
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
            "raku_json_array_remove_number: invalid array.");
 
     unsigned int index = 0;
     while (index  < array->count)
     {
-        JsonValue *v = array->values[index];
+        struct json_value *v = array->values[index];
         if (raku_json_value_of_type(v, RAKU_JSON_NUMBER) &&
-            raku_json_number_get((JsonNumber*)v) == value)
+            raku_json_number_get((struct json_number*)v) == value)
         {
             break;
         }
@@ -615,17 +934,19 @@ void raku_json_array_remove_number(JsonArray *array, double value)
 }
 
 RAKU_API
-void raku_json_array_remove_string(JsonArray *array, unsigned int size, const char *value)
+void raku_json_array_remove_string(struct json_array *array, const struct raku_string *value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)array, RAKU_JSON_ARRAY),
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
            "raku_json_array_remove_string: invalid array.");
+    ASSERT(value != NULL,
+           "raku_json_array_remove_string: invalid value.");
 
     unsigned int index = 0;
     while (index < array->count)
     {
-        JsonValue *v = array->values[index];
+        struct json_value *v = array->values[index];
         if (raku_json_value_of_type(v, RAKU_JSON_STRING) &&
-            raku_json_string_equalc((JsonString*)v, size, value))
+            raku_string_equal(&((struct json_string*)v)->value, value))
         {
             break;
         }
@@ -634,9 +955,30 @@ void raku_json_array_remove_string(JsonArray *array, unsigned int size, const ch
 }
 
 RAKU_API
-RakuStatus raku_json_array_remove_at(JsonArray *array, unsigned int index)
+void raku_json_array_remove_stringc(struct json_array *array, const char *value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)array, RAKU_JSON_ARRAY),
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
+           "raku_json_array_remove_stringc: invalid array.");
+    ASSERT(value != NULL,
+           "raku_json_array_remove_stringc: invalid value.");
+
+    unsigned int index = 0;
+    while (index < array->count)
+    {
+        struct json_value *v = array->values[index];
+        if (raku_json_value_of_type(v, RAKU_JSON_STRING) &&
+            raku_json_string_equalc((struct json_string*)v, value))
+        {
+            break;
+        }
+    }
+    raku_json_array_remove_at(array, index);
+}
+
+RAKU_API
+enum raku_status raku_json_array_remove_at(struct json_array *array, unsigned int index)
+{
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
            "raku_json_array_remove_at: invalid array.");
 
     if (index >= array->count)
@@ -652,9 +994,9 @@ RakuStatus raku_json_array_remove_at(JsonArray *array, unsigned int index)
 }
 
 RAKU_API
-RakuStatus raku_json_array_get(JsonArray *array, unsigned int index, JsonValue **out)
+enum raku_status raku_json_array_get(struct json_array *array, unsigned int index, struct json_value **out)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)array, RAKU_JSON_ARRAY),
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
            "raku_json_array_get: invalid array.");
 
     if (index >= array->count)
@@ -665,24 +1007,24 @@ RakuStatus raku_json_array_get(JsonArray *array, unsigned int index, JsonValue *
 }
 
 RAKU_API
-JsonValue* const* raku_json_array_values(JsonArray *array)
+struct json_value* const* raku_json_array_values(struct json_array *array)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)array, RAKU_JSON_ARRAY),
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
            "raku_json_array_values: invalid array.");
     return array->values;
 }
 
 RAKU_API
-unsigned int raku_json_array_size(JsonArray *array)
+unsigned int raku_json_array_size(struct json_array *array)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)array, RAKU_JSON_ARRAY),
+    ASSERT(raku_json_value_of_type((struct json_value*)array, RAKU_JSON_ARRAY),
            "raku_json_array_size: invalid array.");
     return array->count;
 }
 
-static RakuStatus grow_object(JsonObject *object)
+static enum raku_status grow_object(struct json_object *object)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)object, RAKU_JSON_OBJECT),
+    ASSERT(raku_json_value_of_type((struct json_value*)object, RAKU_JSON_OBJECT),
            "grow_object: invalid object.");
 
     unsigned int new_capacity;
@@ -698,39 +1040,39 @@ static RakuStatus grow_object(JsonObject *object)
                 2 * object->capacity;
     }
     
-    JsonString *keys = NULL;
-    JsonValue **values = NULL;
+    struct json_string *keys = NULL;
+    struct json_value **values = NULL;
 
-    RakuStatus status = raku_alloc(
-        new_capacity * sizeof(JsonString),
+    enum raku_status status = raku_alloc(
+        new_capacity * sizeof(struct json_string),
         (void**)&keys
     );
 
     if (status == RAKU_OK)
     {
         status = raku_alloc(
-            new_capacity * sizeof(JsonValue*),
+            new_capacity * sizeof(struct json_value*),
             (void**)&values
         );
 
         if (status == RAKU_OK)
         {
-            raku_zero_memory(keys, new_capacity * sizeof(JsonString));
-            raku_zero_memory(values, new_capacity * sizeof(JsonValue*));
+            raku_zero_memory(keys, new_capacity * sizeof(struct json_string));
+            raku_zero_memory(values, new_capacity * sizeof(struct json_value*));
 
             unsigned int count = 0;
             for (unsigned int i = 0;
                  i < object->capacity && count != object->count;
                  ++i)
             {
-                JsonString key = object->keys[i];
-                if (key.chars == NULL)
+                struct json_string key = object->keys[i];
+                if (key.value.chars == NULL)
                     continue;
                 
                 unsigned int index = key.hash % new_capacity;
                 while (true)
                 {
-                    if (keys[index].chars == NULL)
+                    if (keys[index].value.chars == NULL)
                     {
                         keys[index] = key;
                         values[index] = object->values[i];
@@ -762,15 +1104,13 @@ static RakuStatus grow_object(JsonObject *object)
 }
 
 RAKU_API
-RakuStatus raku_json_object_set(JsonObject *object, const char *key, JsonValue *value)
+enum raku_status raku_json_object_set(struct json_object *object, const char *key, struct json_value *value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)object, RAKU_JSON_OBJECT),
+    ASSERT(raku_json_value_of_type((struct json_value*)object, RAKU_JSON_OBJECT),
            "raku_json_object_set: invalid object.");
+    ASSERT(strnlen(key, UINT_MAX) != 0, "raku_json_object_set: invalid key.");
 
-    unsigned int size = (unsigned int)strnlen(key, UINT_MAX);
-    ASSERT(size != 0, "raku_json_object_set: invalid key.");
-
-    RakuStatus status = RAKU_OK;
+    enum raku_status status = RAKU_OK;
     if (object->count+1 > object->capacity * OBJECT_THRESHOLD)
     {
         status = grow_object(object);
@@ -778,16 +1118,16 @@ RakuStatus raku_json_object_set(JsonObject *object, const char *key, JsonValue *
             goto rjos_error;
     }
 
-    JsonString jskey;
+    struct json_string jskey;
     raku_json_string_init(&jskey);
-    status = raku_json_string_write_stringc(&jskey, size, key);
+    status = raku_json_string_setc(&jskey, key);
     if (status != RAKU_OK)
         goto rjos_error;
     
     unsigned int index = jskey.hash % object->capacity;
     while (true)
     {
-        if (object->keys[index].chars == NULL)
+        if (object->keys[index].value.chars == NULL)
         {
             object->keys[index] = jskey;
             object->values[index] = value;
@@ -812,86 +1152,111 @@ rjos_error:
 }
 
 RAKU_API
-RakuStatus raku_json_object_set_bool(JsonObject *object, const char *key, bool value)
+enum raku_status raku_json_object_set_bool(struct json_object *object, const char *key, bool value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)object, RAKU_JSON_OBJECT),
+    ASSERT(raku_json_value_of_type((struct json_value*)object, RAKU_JSON_OBJECT),
            "raku_json_object_set_bool: invalid object.");
 
-    JsonBool *boolean;
-    RakuStatus status = raku_json_bool_create(&boolean);
+    struct json_bool *boolean;
+    enum raku_status status = raku_json_bool_create(&boolean);
     if (status == RAKU_OK)
     {
         raku_json_bool_set(boolean, value);
-        status = raku_json_object_set(object, key, (JsonValue*)boolean);
+        status = raku_json_object_set(object, key, (struct json_value*)boolean);
         if (status != RAKU_OK)
-            raku_json_value_free((JsonValue*)boolean);
+            raku_json_value_free((struct json_value*)boolean);
     }
     return status;
 }
 
 RAKU_API
-RakuStatus raku_json_object_set_number(JsonObject *object, const char *key, double value)
+enum raku_status raku_json_object_set_number(struct json_object *object, const char *key, double value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)object, RAKU_JSON_OBJECT),
+    ASSERT(raku_json_value_of_type((struct json_value*)object, RAKU_JSON_OBJECT),
            "raku_json_object_set_number: invalid object.");
 
-    JsonNumber *number;
-    RakuStatus status = raku_json_number_create(&number);
+    struct json_number *number;
+    enum raku_status status = raku_json_number_create(&number);
     if (status == RAKU_OK)
     {
         raku_json_number_set(number, value);
-        status = raku_json_object_set(object, key, (JsonValue*)number);
+        status = raku_json_object_set(object, key, (struct json_value*)number);
         if (status != RAKU_OK)
-            raku_json_value_free((JsonValue*)number);
+            raku_json_value_free((struct json_value*)number);
     }
     return status;
 }
 
 RAKU_API
-RakuStatus raku_json_object_set_string(JsonObject *object, const char *key, unsigned int size, const char *value)
+enum raku_status raku_json_object_set_string(struct json_object *object, const char *key, struct raku_string *value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)object, RAKU_JSON_OBJECT),
+    ASSERT(raku_json_value_of_type((struct json_value*)object, RAKU_JSON_OBJECT),
            "raku_json_object_set_string: invalid object.");
+    ASSERT(value != NULL,
+           "raku_json_object_set_string: invalid value.");
 
-    JsonString *string;
-    RakuStatus status = raku_json_string_create(&string);
+    struct json_string *string;
+    enum raku_status status = raku_json_string_create(&string);
     if (status == RAKU_OK)
     {
-        status = raku_json_string_write_stringc(string, size, value);
-        if (status == RAKU_OK)
-        {
-            status = raku_json_object_set(object, key, (JsonValue*)string);
-            if (status == RAKU_OK)
-                goto rjoss_end;
-        }
-        raku_json_value_free((JsonValue*)string);
+        raku_json_string_set(string, value);
+        status = raku_json_object_set(object, key, (struct json_value*)string);
+        if (status != RAKU_OK)
+            raku_json_value_free((struct json_value*)string);
     }
 
-rjoss_end:
     return status;
 }
 
 RAKU_API
-void raku_json_object_remove(JsonObject *object, const char *key)
+enum raku_status raku_json_object_set_stringc(struct json_object *object, const char *key, const char *value)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)object, RAKU_JSON_OBJECT),
+    ASSERT(raku_json_value_of_type((struct json_value*)object, RAKU_JSON_OBJECT),
+           "raku_json_object_set_string: invalid object.");
+    ASSERT(value != NULL,
+           "raku_json_object_set_string: invalid value.");
+
+    struct json_string *string;
+    enum raku_status status = raku_json_string_create(&string);
+    if (status == RAKU_OK)
+    {
+        status = raku_json_string_setc(string, value);
+        if (status == RAKU_OK)
+        {
+            status = raku_json_object_set(object, key, (struct json_value*)string);
+            if (status == RAKU_OK)
+                goto rjossc_end;
+        }
+        raku_json_value_free((struct json_value*)string);
+    }
+
+rjossc_end:
+    return status;
+}
+
+RAKU_API
+void raku_json_object_remove(struct json_object *object, const char *key)
+{
+    ASSERT(raku_json_value_of_type((struct json_value*)object, RAKU_JSON_OBJECT),
            "raku_json_object_remove: invalid object.");
 
     unsigned int size = (unsigned int)strnlen(key, UINT_MAX);
     ASSERT(size != 0, "raku_json_object_remove: invalid key.");
 
-    JsonString jskey = {
+    const struct json_string jskey = {
         ._header.type = RAKU_JSON_STRING,
-        .chars = (char*)key,
         .hash = hash_string(key),
-        .count = size,
-        .capacity = size
+        .value = {
+            .chars = (char*)key,
+            .count = size,
+            .capacity = size
+        }
     };
 
     unsigned int index = jskey.hash % object->capacity;
     while (true)
     {
-        if (object->keys[index].chars == NULL)
+        if (object->keys[index].value.chars == NULL)
             return;
         else if (raku_json_string_equal(object->keys+index, &jskey))
             break;
@@ -903,11 +1268,11 @@ void raku_json_object_remove(JsonObject *object, const char *key)
     raku_json_value_free(object->values[index]);
     --object->count;
 
-    for (unsigned int i = index+1; object->keys[i].chars != NULL; ++i)
+    for (unsigned int i = index+1; object->keys[i].value.chars != NULL; ++i)
     {
         i = (i < object->capacity) ? i : i % object->capacity;
 
-        JsonString key = object->keys[i];
+        struct json_string key = object->keys[i];
         if ((key.hash % object->capacity) <= index)
         {
             object->keys[index] = key;
@@ -921,26 +1286,28 @@ void raku_json_object_remove(JsonObject *object, const char *key)
 }
 
 RAKU_API
-bool raku_json_object_has(JsonObject *object, const char *key)
+bool raku_json_object_has(struct json_object *object, const char *key)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)object, RAKU_JSON_OBJECT),
+    ASSERT(raku_json_value_of_type((struct json_value*)object, RAKU_JSON_OBJECT),
            "raku_json_object_has: invalid object.");
 
     unsigned int size = (unsigned int)strnlen(key, UINT_MAX);
     ASSERT(size != 0, "raku_json_object_has: invalid key.");
 
-    JsonString jskey = {
+    const struct json_string jskey = {
         ._header.type = RAKU_JSON_STRING,
-        .chars = (char*)key,
         .hash = hash_string(key),
-        .count = size,
-        .capacity = size
+        .value = {
+            .chars = (char*)key,
+            .count = size,
+            .capacity = size
+        }
     };
 
     unsigned int index = jskey.hash % object->capacity;
     while (true)
     {
-        if (object->keys[index].chars == NULL)
+        if (object->keys[index].value.chars == NULL)
             return false;
         else if (raku_json_string_equal(object->keys+index, &jskey))
             return true;
@@ -950,26 +1317,28 @@ bool raku_json_object_has(JsonObject *object, const char *key)
 }
 
 RAKU_API
-RakuStatus raku_json_object_get(JsonObject *object, const char *key, JsonValue **out)
+enum raku_status raku_json_object_get(struct json_object *object, const char *key, struct json_value **out)
 {
-    ASSERT(raku_json_value_of_type((JsonValue*)object, RAKU_JSON_OBJECT),
+    ASSERT(raku_json_value_of_type((struct json_value*)object, RAKU_JSON_OBJECT),
            "raku_json_object_get: invalid object.");
 
     unsigned int size = (unsigned int)strnlen(key, UINT_MAX);
     ASSERT(size != 0, "raku_json_object_get: invalid key.");
 
-    JsonString jskey = {
+    const struct json_string jskey = {
         ._header.type = RAKU_JSON_STRING,
-        .chars = (char*)key,
         .hash = hash_string(key),
-        .count = size,
-        .capacity = size
+        .value = {
+            .chars = (char*)key,
+            .count = size,
+            .capacity = size
+        }
     };
 
     unsigned int index = jskey.hash % object->capacity;
     while (true)
     {
-        if (object->keys[index].chars == NULL)
+        if (object->keys[index].value.chars == NULL)
             return RAKU_JSON_NO_KEY;
         else if (raku_json_string_equal(object->keys+index, &jskey))
         {

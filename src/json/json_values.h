@@ -3,73 +3,71 @@
 
 #include <RAKU/json.h>
 
-typedef uint32_t StringHash;
+typedef uint32_t string_hash;
 
-struct JsonValue
+struct json_value
 {
     enum JsonValueType type;
 };
 
-struct JsonBool
+struct json_bool
 {
-    struct JsonValue _header;
+    struct json_value _header;
     bool value;
 };
 
-struct JsonNumber
+struct json_number
 {
-    struct JsonValue _header;
+    struct json_value _header;
     double value;
 };
 
-struct JsonString
+struct json_string
 {
-    struct JsonValue _header;
-    char *chars;
-    StringHash hash;
+    struct json_value _header;
+    string_hash hash;
+    struct raku_string value;
+};
+
+struct json_array
+{
+    struct json_value _header;
+    struct json_value **values;
     unsigned int count;
     unsigned int capacity;
 };
 
-struct JsonArray
+struct json_object
 {
-    struct JsonValue _header;
-    struct JsonValue **values;
-    unsigned int count;
-    unsigned int capacity;
-};
-
-struct JsonObject
-{
-    struct JsonValue _header;
-    struct JsonString *keys;
-    struct JsonValue **values;
+    struct json_value _header;
+    struct json_string *keys;
+    struct json_value **values;
     unsigned int count;
     unsigned int capacity;
 };
 
 RAKU_LOCAL
-void raku_json_bool_init(JsonBool *boolean);
+void raku_json_bool_init(struct json_bool *boolean);
 
 RAKU_LOCAL
-void raku_json_number_init(JsonNumber *number);
+void raku_json_number_init(struct json_number *number);
 
 RAKU_LOCAL
-void raku_json_string_init(JsonString *string);
+void raku_json_string_init(struct json_string *string);
 
 RAKU_LOCAL
-void raku_json_array_init(JsonArray *array);
+void raku_json_array_init(struct json_array *array);
 
 RAKU_LOCAL
-void raku_json_object_init(JsonObject *object);
+void raku_json_object_init(struct json_object *object);
 
 RAKU_LOCAL
-void raku_json_string_free(JsonString *string);
+void raku_json_string_free(struct json_string *string);
 
 RAKU_LOCAL
-void raku_json_array_free(JsonArray *array);
+void raku_json_array_free(struct json_array *array);
 
 RAKU_LOCAL
-void raku_json_object_free(JsonObject *object);
+void raku_json_object_free(struct json_object *object);
 
 #endif

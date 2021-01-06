@@ -5,7 +5,7 @@
 #include <errno.h>
 
 RAKU_API
-RakuStatus raku_alloc(size_t size, void **out)
+enum raku_status raku_alloc(size_t size, void **out)
 {
     void *m = malloc(size);
     if (m == NULL && errno == ENOMEM)
@@ -18,7 +18,7 @@ RakuStatus raku_alloc(size_t size, void **out)
 }
 
 RAKU_API
-RakuStatus raku_realloc(void *block, size_t new_size, void **out)
+enum raku_status raku_realloc(void *block, size_t new_size, void **out)
 {
     void *m = realloc(block, new_size);
     if (m == NULL && errno == ENOMEM)
