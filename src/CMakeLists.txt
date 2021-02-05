@@ -8,6 +8,7 @@ set(
         core/log.c
         core/status.c
         core/memory.c
+        json/json_parse.c
         json/json_values.h
         json/json_values.c
 )

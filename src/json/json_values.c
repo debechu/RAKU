@@ -15,6 +15,64 @@
 #define FNV_OFFSET_BASIS 2166136261U
 #define FNV_PRIME 16777619U
 
+static enum raku_status write_string(struct json_string *string, struct raku_string *out)
+{
+    ASSERT(raku_json_value_of_type((struct json_value*)string, RAKU_JSON_STRING),
+           "write_string: invalid string.");
+
+    enum raku_status status = raku_string_write(out, '"');
+    if (status != RAKU_OK)
+        goto ws_end;
+    
+    if (string->value.chars)
+    {
+        const char *c = string->value.chars;
+        while (*c != '\0')
+        {
+            switch (*c)
+            {
+            case '"':
+                status = raku_string_writesc(out, "\\\"");
+                break;
+            case '\\':
+                status = raku_string_writesc(out, "\\\\");
+                break;
+            case '/':
+                status = raku_string_writesc(out, "\\/");
+                break;
+            case '\b':
+                status = raku_string_writesc(out, "\\b");
+                break;
+            case '\f':
+                status = raku_string_writesc(out, "\\f");
+                break;
+            case '\n':
+                status = raku_string_writesc(out, "\\n");
+                break;
+            case '\r':
+                status = raku_string_writesc(out, "\\r");
+                break;
+            case '\t':
+                status = raku_string_writesc(out, "\\t");
+                break;
+            default:
+                status = raku_string_write(out, *c);
+                break;
+            }
+
+            if (status != RAKU_OK)
+                goto ws_end;
+            
+            ++c;
+        }
+    }
+
+    status = raku_string_write(out, '"');
+
+ws_end:
+    return status;
+}
+
 static enum raku_status raku_json_value_to_string_compact(struct json_value *value, struct raku_string *out)
 {
     switch (raku_json_value_get_type(value))
@@ -26,8 +84,8 @@ static enum raku_status raku_json_value_to_string_compact(struct json_value *val
                 return raku_string_writesc(out, "false");
         case RAKU_JSON_NUMBER:
         {
-            char n[16];
-            snprintf(n, 16, "%.8g", ((struct json_number*)value)->value);
+            char n[32];
+            snprintf(n, 32, "%.24g", ((struct json_number*)value)->value);
             return raku_string_writesc(out, n);
         }
         default:
@@ -35,56 +93,7 @@ static enum raku_status raku_json_value_to_string_compact(struct json_value *val
         case RAKU_JSON_NULL:
             return raku_string_writesc(out, "null");
         case RAKU_JSON_STRING:
-        {
-            enum raku_status status = raku_string_write(out, '"');
-            if (status != RAKU_OK)
-                goto rjvtsc_rjvgtv_caseRJS_end;
-            
-            const char *c = raku_json_string_get((struct json_string*)value).chars;
-            while (*c)
-            {
-                switch (*c)
-                {
-                case '"':
-                    status = raku_string_writesc(out, "\\\"");
-                    break;
-                case '\\':
-                    status = raku_string_writesc(out, "\\\\");
-                    break;
-                case '/':
-                    status = raku_string_writesc(out, "\\/");
-                    break;
-                case '\b':
-                    status = raku_string_writesc(out, "\\b");
-                    break;
-                case '\f':
-                    status = raku_string_writesc(out, "\\f");
-                    break;
-                case '\n':
-                    status = raku_string_writesc(out, "\\n");
-                    break;
-                case '\r':
-                    status = raku_string_writesc(out, "\\r");
-                    break;
-                case '\t':
-                    status = raku_string_writesc(out, "\\t");
-                    break;
-                default:
-                    status = raku_string_write(out, *c);
-                    break;
-                }
-
-                if (status != RAKU_OK)
-                    goto rjvtsc_rjvgtv_caseRJS_end;
-                
-                ++c;
-            }
-
-            status = raku_string_write(out, '"');
-
-        rjvtsc_rjvgtv_caseRJS_end:
-            return status;
-        }
+            return write_string((struct json_string*)value, out);
         case RAKU_JSON_ARRAY:
         {
             enum raku_status status = raku_string_write(out, '[');
@@ -131,7 +140,7 @@ static enum raku_status raku_json_value_to_string_compact(struct json_value *val
                     if (object->keys[i].value.chars == NULL)
                         continue;
 
-                    status = raku_json_value_to_string_compact((struct json_value*)(object->keys+i), out);
+                    status = write_string(object->keys+i, out);
                     if (status != RAKU_OK)
                         goto rjvtsc_rjvgtv_caseRJO_end;
                     
@@ -155,7 +164,7 @@ static enum raku_status raku_json_value_to_string_compact(struct json_value *val
                     if (status != RAKU_OK)
                         goto rjvtsc_rjvgtv_caseRJO_end;
 
-                    status = raku_json_value_to_string_compact((struct json_value*)(object->keys+i), out);
+                    status = write_string(object->keys+i, out);
                     if (status != RAKU_OK)
                         goto rjvtsc_rjvgtv_caseRJO_end;
                     
@@ -206,8 +215,8 @@ static enum raku_status raku_json_value_to_string_indent(
                 return raku_string_writesc(out, "false");
         case RAKU_JSON_NUMBER:
         {
-            char n[16];
-            snprintf(n, 16, "%.8g", ((struct json_number*)value)->value);
+            char n[32];
+            snprintf(n, 32, "%.24g", ((struct json_number*)value)->value);
             return raku_string_writesc(out, n);
         }
         default:
@@ -215,56 +224,7 @@ static enum raku_status raku_json_value_to_string_indent(
         case RAKU_JSON_NULL:
             return raku_string_writesc(out, "null");
         case RAKU_JSON_STRING:
-        {
-            enum raku_status status = raku_string_write(out, '"');
-            if (status != RAKU_OK)
-                goto rjvtsi_rjvgtv_caseRJS_end;
-            
-            const char *c = raku_json_string_get((struct json_string*)value).chars;
-            while (*c)
-            {
-                switch (*c)
-                {
-                case '"':
-                    status = raku_string_writesc(out, "\\\"");
-                    break;
-                case '\\':
-                    status = raku_string_writesc(out, "\\\\");
-                    break;
-                case '/':
-                    status = raku_string_writesc(out, "\\/");
-                    break;
-                case '\b':
-                    status = raku_string_writesc(out, "\\b");
-                    break;
-                case '\f':
-                    status = raku_string_writesc(out, "\\f");
-                    break;
-                case '\n':
-                    status = raku_string_writesc(out, "\\n");
-                    break;
-                case '\r':
-                    status = raku_string_writesc(out, "\\r");
-                    break;
-                case '\t':
-                    status = raku_string_writesc(out, "\\t");
-                    break;
-                default:
-                    status = raku_string_write(out, *c);
-                    break;
-                }
-
-                if (status != RAKU_OK)
-                    goto rjvtsi_rjvgtv_caseRJS_end;
-                
-                ++c;
-            }
-
-            status = raku_string_write(out, '"');
-
-        rjvtsi_rjvgtv_caseRJS_end:
-            return status;
-        }
+            return write_string((struct json_string*)value, out);
         case RAKU_JSON_ARRAY:
         {
             enum raku_status status = raku_string_write(out, '[');
@@ -339,7 +299,7 @@ static enum raku_status raku_json_value_to_string_indent(
                     if (object->keys[i].value.chars == NULL)
                         continue;
 
-                    status = raku_json_value_to_string_indent((struct json_value*)(object->keys+i), indent, level+1, out);
+                    status = write_string(object->keys+i, out);
                     if (status != RAKU_OK)
                         goto rjvtsi_rjvgtv_caseRJO_end;
                     
@@ -367,7 +327,7 @@ static enum raku_status raku_json_value_to_string_indent(
                     if (status != RAKU_OK)
                         goto rjvtsi_rjvgtv_caseRJO_end;
 
-                    status = raku_json_value_to_string_indent((struct json_value*)(object->keys+i), indent, level, out);
+                    status = write_string(object->keys+i, out);
                     if (status != RAKU_OK)
                         goto rjvtsi_rjvgtv_caseRJO_end;
                     
@@ -668,10 +628,13 @@ double raku_json_number_get(struct json_number *number)
 static string_hash hash_string(const char *src)
 {
     string_hash hash = FNV_OFFSET_BASIS;
-    while (*src != '\0')
+    if (src)
     {
-        hash ^= *(src++);
-        hash *= FNV_PRIME;
+        while (*src != '\0')
+        {
+            hash ^= *(src++);
+            hash *= FNV_PRIME;
+        }
     }
     return hash;
 }
@@ -1339,7 +1302,7 @@ enum raku_status raku_json_object_get(struct json_object *object, const char *ke
     while (true)
     {
         if (object->keys[index].value.chars == NULL)
-            return RAKU_JSON_NO_KEY;
+            return RAKU_OUT_OF_RANGE;
         else if (raku_json_string_equal(object->keys+index, &jskey))
         {
             *out = object->values[index];

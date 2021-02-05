@@ -7,7 +7,7 @@ typedef uint32_t string_hash;
 
 struct json_value
 {
-    enum JsonValueType type;
+    enum json_value_type type;
 };
 
 struct json_bool

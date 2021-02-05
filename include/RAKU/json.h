@@ -35,6 +35,18 @@ struct json_string;
 struct json_array;
 struct json_object;
 
+struct json_error
+{
+    unsigned int column;
+    unsigned int row;
+};
+
+RAKU_API
+enum raku_status raku_json_parse(const char *src, struct json_value **out);
+
+RAKU_API
+enum raku_status raku_json_parse_err(const char *src, struct json_value **out, struct json_error *err);
+
 RAKU_API
 enum raku_status raku_json_value_to_string(struct json_value *value, enum json_format_option options, struct raku_string *out);
 
